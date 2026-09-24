@@ -145,6 +145,7 @@ class _VygoHomePageState extends State<VygoHomePage> {
   MapboxMap? _map;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   StreamSubscription<geolocator.Position>? _locationSubscription;
+  Timer? _demoTrackingTimer;
   Timer? _inactivityTimer;
   int _pendingCount = 0;
   bool _isOnline = true;
@@ -153,6 +154,10 @@ class _VygoHomePageState extends State<VygoHomePage> {
   bool _isTracking = false;
   bool _isWorking = false;
   DateTime? _lastActivityAt;
+  DateTime? _lastLocationUpdateAt;
+  int _locationUpdateCount = 0;
+  double? _lastLatitude;
+  double? _lastLongitude;
   String _message = 'Listo para comenzar';
 
   @override
@@ -176,6 +181,7 @@ class _VygoHomePageState extends State<VygoHomePage> {
   void dispose() {
     _connectivitySubscription?.cancel();
     _locationSubscription?.cancel();
+    _demoTrackingTimer?.cancel();
     _inactivityTimer?.cancel();
     super.dispose();
   }
@@ -257,6 +263,8 @@ class _VygoHomePageState extends State<VygoHomePage> {
     if (_isTracking) {
       await _locationSubscription?.cancel();
       _locationSubscription = null;
+      _demoTrackingTimer?.cancel();
+      _demoTrackingTimer = null;
       if (mounted) {
         setState(() {
           _isTracking = false;
@@ -267,6 +275,9 @@ class _VygoHomePageState extends State<VygoHomePage> {
     }
 
     if (kIsWeb) {
+      _demoTrackingTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+        _recordLocationUpdate(12.1364, -86.2684);
+      });
       if (mounted) {
         setState(() {
           _isTracking = true;
@@ -318,7 +329,7 @@ class _VygoHomePageState extends State<VygoHomePage> {
     _locationSubscription = geolocator.Geolocator.getPositionStream(
       locationSettings: locationSettings,
     ).listen((position) async {
-      _registerActivity();
+      _recordLocationUpdate(position.latitude, position.longitude);
       await _savePosition(position);
       await _loadQueue();
       if (_isOnline) {
@@ -336,6 +347,29 @@ class _VygoHomePageState extends State<VygoHomePage> {
         _message = 'Tracking activo cada 5 segundos';
       });
     }
+  }
+
+  void _recordLocationUpdate(double latitude, double longitude) {
+    _registerActivity();
+    _lastLocationUpdateAt = DateTime.now();
+    _locationUpdateCount++;
+    _lastLatitude = latitude;
+    _lastLongitude = longitude;
+    debugPrint(
+      '[Vygo tracking] update #$_locationUpdateCount '
+      '${_lastLocationUpdateAt!.toIso8601String()} '
+      'lat=$latitude lon=$longitude',
+    );
+    if (mounted) setState(() {});
+  }
+
+  String _lastUpdateLabel() {
+    final update = _lastLocationUpdateAt;
+    if (update == null) return 'Esperando primera actualización';
+    final hour = update.hour.toString().padLeft(2, '0');
+    final minute = update.minute.toString().padLeft(2, '0');
+    final second = update.second.toString().padLeft(2, '0');
+    return 'Última actualización: $hour:$minute:$second';
   }
 
   Future<void> _toggleWorkday() async {
@@ -637,6 +671,8 @@ class _VygoHomePageState extends State<VygoHomePage> {
             fontSize: 13,
           ),
         ),
+        const SizedBox(height: 12),
+        _trackingDiagnostics(),
         const SizedBox(height: 16),
         SizedBox(
           width: double.infinity,
@@ -707,6 +743,56 @@ class _VygoHomePageState extends State<VygoHomePage> {
             ),
           ),
         ),
+      ],
+    ),
+  );
+
+  Widget _trackingDiagnostics() => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: _ink.withValues(alpha: .06),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: _ink.withValues(alpha: .1)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              _isTracking ? Icons.radio_button_checked : Icons.radio_button_off,
+              size: 16,
+              color: _isTracking ? _neonGreen : _ink.withValues(alpha: .45),
+            ),
+            const SizedBox(width: 7),
+            Text(
+              _isTracking ? 'Tracking activo' : 'Tracking detenido',
+              style: const TextStyle(
+                color: _ink,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              '$_locationUpdateCount actualizaciones',
+              style: TextStyle(color: _ink.withValues(alpha: .65)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 5),
+        Text(
+          _lastUpdateLabel(),
+          style: TextStyle(color: _ink.withValues(alpha: .65), fontSize: 12),
+        ),
+        if (_lastLatitude != null && _lastLongitude != null) ...[
+          const SizedBox(height: 3),
+          Text(
+            'Coordenadas: ${_lastLatitude!.toStringAsFixed(5)}, '
+            '${_lastLongitude!.toStringAsFixed(5)}',
+            style: TextStyle(color: _ink.withValues(alpha: .65), fontSize: 12),
+          ),
+        ],
       ],
     ),
   );
